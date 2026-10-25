@@ -1,0 +1,61 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # needed to diff against previous commits
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Format
+        run: pnpm format:check
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Select tests
+        id: select
+        run: |
+          if [ "${{ github.event_name }}" = "push" ] && [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            echo "tests=ALL" >> "$GITHUB_OUTPUT"
+          else
+            if [ "${{ github.event_name }}" = "pull_request" ]; then
+              BASE="origin/${{ github.base_ref }}"
+            else
+              BASE="${{ github.event.before }}"
+            fi
+            echo "tests=$(node scripts/select-tests.mjs "$BASE")" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Test
+        run: |
+          T="${{ steps.select.outputs.tests }}"
+          echo "Selected: $T"
+          if [ "$T" = "ALL" ]; then
+            pnpm test
+          elif [ "$T" = "NONE" ]; then
+            echo "No test-relevant changes."
+          else
+            pnpm vitest related --run --passWithNoTests $T
+          fi
+
+      - name: Build
+        run: pnpm build
