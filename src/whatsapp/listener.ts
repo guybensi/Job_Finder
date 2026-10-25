@@ -108,6 +108,8 @@ export interface WhatsAppOptions {
 
 export interface WhatsApp {
   isConnected(): boolean;
+  /** Re-read the list of groups the account is in (joining a group does not always emit an event). */
+  refreshGroups(): Promise<void>;
   stop(): void;
 }
 
@@ -136,8 +138,9 @@ export function startWhatsApp(opts: WhatsAppOptions): WhatsApp {
     }
   };
 
+  let lastUnknownRefresh = 0;
   const refreshGroups = async () => {
-    if (!sock) return;
+    if (!sock || !connected) return;
     const groups = await sock.groupFetchAllParticipating();
     const names = Object.fromEntries(Object.values(groups).map((g) => [g.id, g.subject]));
     opts.store.setKv(KV.groupNames, names);
@@ -202,6 +205,14 @@ export function startWhatsApp(opts: WhatsAppOptions): WhatsApp {
         const record = toNewMessage(m, allowed, names, now());
         if (record) opts.store.insertMessage(record);
       }
+      // A message from a group we have no name for means a group we just joined.
+      const unknown = messages.some(
+        (m) => m.key.remoteJid?.endsWith("@g.us") && !names.has(m.key.remoteJid),
+      );
+      if (unknown && now() - lastUnknownRefresh > 60_000) {
+        lastUnknownRefresh = now();
+        refreshGroups().catch((e) => logger.warn({ err: e }, "group fetch failed"));
+      }
     });
   };
 
@@ -209,6 +220,7 @@ export function startWhatsApp(opts: WhatsAppOptions): WhatsApp {
 
   return {
     isConnected: () => connected,
+    refreshGroups,
     stop() {
       stopped = true;
       sock?.end(undefined);

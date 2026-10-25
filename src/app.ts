@@ -31,6 +31,8 @@ export interface AppDeps {
   /** `null` when SMTP is not configured. */
   mailer: Mailer | null;
   waConnected: () => boolean;
+  /** Re-read WhatsApp's group list; optional so tests can leave it out. */
+  refreshGroups?: () => Promise<void>;
   now?: () => number;
   /** Gap between two applications (human pace). */
   sendGapMs?: { min: number; max: number };
@@ -153,6 +155,13 @@ export function createApp(d: AppDeps): App {
     return run ?? null;
   };
 
+  /** Refresh the group list, but never let a slow or failing WhatsApp block the bot. */
+  const refresh = async () => {
+    if (!d.refreshGroups) return;
+    const timeout = new Promise<void>((resolve) => setTimeout(resolve, 10_000).unref());
+    await Promise.race([d.refreshGroups().catch(() => undefined), timeout]);
+  };
+
   const readyJob = (jobId: number) => {
     const job = d.store.getJob(jobId);
     return job && job.status === "ready" ? job : null;
@@ -179,7 +188,8 @@ export function createApp(d: AppDeps): App {
     setPaused: (paused) => d.store.setKv("paused", paused),
     profileYaml: () => profileToYaml(loadProfile(dataDir)),
     saveProfile: (yaml) => void saveProfile(dataDir, yaml),
-    groups() {
+    async groups() {
+      await refresh();
       const names = d.store.getKv<Record<string, string>>(KV.groupNames, {});
       const allowed = new Set(d.store.getKv<string[]>(KV.allowedGroups, []));
       const ids = new Set([...Object.keys(names), ...allowed]);
@@ -253,6 +263,7 @@ export function createApp(d: AppDeps): App {
 
   const tick = async () => {
     d.store.purgeOldMessages(MESSAGE_RETENTION_MS, now());
+    await refresh();
 
     const lastDigest = d.store.getKv<number | null>("last_digest", null);
     if (isDigestDue(now(), lastDigest, d.digestHour ?? 20, d.timeZone ?? "Asia/Jerusalem")) {

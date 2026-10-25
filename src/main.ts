@@ -32,6 +32,7 @@ async function main(): Promise<void> {
       await bot?.sendCard(card, pdf);
     },
     waConnected: () => wa?.isConnected() ?? false,
+    refreshGroups: async () => wa?.refreshGroups(),
   });
   bot = startBot(env.TELEGRAM_BOT_TOKEN, env.TELEGRAM_OWNER_ID, app.handlers);
   bot.start((e) => {

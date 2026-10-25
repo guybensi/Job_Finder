@@ -20,7 +20,8 @@ export interface BotHandlers {
   profileYaml(): string;
   /** Validate and save; throws with a readable message when invalid. */
   saveProfile(yaml: string): void;
-  groups(): { id: string; name: string; allowed: boolean }[];
+  /** Groups the account is in, fetched fresh from WhatsApp when possible. */
+  groups(): Promise<{ id: string; name: string; allowed: boolean }[]>;
   toggleGroup(id: string): void;
   /** Parse an uploaded CV into a pending master CV; returns a short summary to confirm. */
   parseCv(file: { name: string; data: Buffer }): Promise<string>;
@@ -131,7 +132,7 @@ export class BotCore {
         }
       }
       case "/groups":
-        return [this.groupsReply()];
+        return [await this.groupsReply()];
       case "/cv":
         return [{ text: T.cvAsk }];
       default:
@@ -139,8 +140,8 @@ export class BotCore {
     }
   }
 
-  private groupsReply(): Reply {
-    const groups = this.h.groups();
+  private async groupsReply(): Promise<Reply> {
+    const groups = await this.h.groups();
     if (!groups.length) return { text: T.noGroups };
     const buttons = groups.map((g) => [
       {
@@ -198,7 +199,7 @@ export class BotCore {
         };
       case "group":
         this.h.toggleGroup(action.groupId);
-        return { replies: [this.groupsReply()], removeButtons: true };
+        return { replies: [await this.groupsReply()], removeButtons: true };
     }
   }
 

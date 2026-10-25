@@ -262,11 +262,11 @@ describe("app handlers", () => {
     expect(s.app.handlers.saveCv()).toBe(false);
     expect(s.app.handlers.discardCv()).toBe(false);
   });
-  it("groups list and toggle", () => {
+  it("groups list and toggle", async () => {
     const s = setup();
     s.store.setKv(KV.groupNames, { "a@g.us": "Alpha", "b@g.us": "Beta" });
     s.app.handlers.toggleGroup("b@g.us");
-    expect(s.app.handlers.groups()).toEqual([
+    expect(await s.app.handlers.groups()).toEqual([
       { id: "b@g.us", name: "Beta", allowed: true },
       { id: "a@g.us", name: "Alpha", allowed: false },
     ]);
@@ -306,5 +306,53 @@ describe("tick", () => {
   it("formatCounts", () => {
     expect(formatCounts({})).toBe(T.noActivity);
     expect(formatCounts({ ready: 2, skipped: 0 })).toBe("ממתינות לאישורך: 2");
+  });
+});
+
+function groupApp(refreshGroups?: () => Promise<void>) {
+  const store = openStore(":memory:");
+  const env = loadEnv({
+    TELEGRAM_BOT_TOKEN: "t",
+    TELEGRAM_OWNER_ID: "1",
+    WA_PHONE: "10000000000",
+    DATA_DIR: mkdtempSync(path.join(tmpdir(), "jf-g-")),
+  });
+  const a = createApp({
+    env,
+    store,
+    llm: new FakeLlm(() => ({})),
+    notify: async () => {},
+    sendCard: async () => {},
+    mailer: null,
+    waConnected: () => true,
+    refreshGroups,
+  });
+  return { a, store };
+}
+
+describe("group list refresh", () => {
+  it("/groups fetches fresh list (new group appears)", async () => {
+    let calls = 0;
+    const { a, store } = groupApp(async () => {
+      calls++;
+      store.setKv(KV.groupNames, { "a@g.us": "Alpha", "new@g.us": "New Jobs" });
+    });
+    store.setKv(KV.groupNames, { "a@g.us": "Alpha" });
+    const list = await a.handlers.groups();
+    expect(calls).toBe(1);
+    expect(list.map((g) => g.name)).toEqual(["Alpha", "New Jobs"]);
+  });
+  it("refresh failure still returns the stored list", async () => {
+    const { a, store } = groupApp(async () => {
+      throw new Error("not connected");
+    });
+    store.setKv(KV.groupNames, { "a@g.us": "Alpha" });
+    expect((await a.handlers.groups()).map((g) => g.name)).toEqual(["Alpha"]);
+  });
+  it("tick refreshes too", async () => {
+    let calls = 0;
+    const { a } = groupApp(async () => void calls++);
+    await a.tick();
+    expect(calls).toBe(1);
   });
 });

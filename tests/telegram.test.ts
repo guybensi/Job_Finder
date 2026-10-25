@@ -37,7 +37,7 @@ function handlers(over: Partial<BotHandlers> = {}): BotHandlers & { log: string[
       if (y.includes("bad")) throw new Error("roles: invalid");
       log.push("saved");
     },
-    groups: () => [
+    groups: async () => [
       { id: "1@g.us", name: "A", allowed: true },
       { id: "2@g.us", name: "B", allowed: false },
     ],
@@ -165,9 +165,9 @@ describe("BotCore", () => {
     const res = await core.handleCallback("g:2@g.us");
     expect(h.log).toContain("toggle:2@g.us");
     expect(res.replies[0]!.buttons).toBeDefined();
-    expect((await new BotCore(handlers({ groups: () => [] })).handleText("/groups"))[0]!.text).toBe(
-      T.noGroups,
-    );
+    expect(
+      (await new BotCore(handlers({ groups: async () => [] })).handleText("/groups"))[0]!.text,
+    ).toBe(T.noGroups);
   });
   it("apply / manual remove buttons", async () => {
     const core = new BotCore(handlers());
