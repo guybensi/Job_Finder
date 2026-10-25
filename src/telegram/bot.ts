@@ -254,7 +254,8 @@ export interface TelegramBot {
   notify(text: string): Promise<void>;
   /** Send an approval card, with the tailored CV attached first when given. */
   sendCard(card: CardInput, pdf?: { name: string; data: Buffer }): Promise<void>;
-  start(): void;
+  /** Start long polling; `onFatal` is called if polling stops for good (e.g. a bad token). */
+  start(onFatal: (e: Error) => void): void;
   stop(): Promise<void>;
 }
 
@@ -265,6 +266,7 @@ export interface TelegramBot {
 export function startBot(token: string, ownerId: number, handlers: BotHandlers): TelegramBot {
   const bot = new Bot(token);
   const core = new BotCore(handlers);
+  let stopping = false;
 
   const send = async (r: Reply) => {
     await bot.api.sendMessage(ownerId, r.text, {
@@ -314,9 +316,14 @@ export function startBot(token: string, ownerId: number, handlers: BotHandlers):
       if (pdf) await bot.api.sendDocument(ownerId, new InputFile(pdf.data, pdf.name));
       await send(cardReply(card));
     },
-    start() {
-      void bot.start({ drop_pending_updates: false });
+    start(onFatal) {
+      bot.start().catch((e: unknown) => {
+        if (!stopping) onFatal(e instanceof Error ? e : new Error(String(e)));
+      });
     },
-    stop: () => bot.stop(),
+    stop() {
+      stopping = true;
+      return bot.stop();
+    },
   };
 }

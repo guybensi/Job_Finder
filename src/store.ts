@@ -299,6 +299,15 @@ export class Store {
     }));
   }
 
+  /** Whether the owner recorded `action` for this job (e.g. pressed Apply). */
+  hasDecision(jobId: number, action: DecisionAction): boolean {
+    return (
+      this.db
+        .prepare("SELECT 1 FROM decisions WHERE job_id = ? AND action = ? LIMIT 1")
+        .get(jobId, action) !== undefined
+    );
+  }
+
   /** Count of jobs per status created at or after `since`. */
   statusCounts(since: number): Partial<Record<JobStatus, number>> {
     const rows = this.db

@@ -108,6 +108,9 @@ describe("store", () => {
       { jobId: id, action: "skip", reason: "too far", ts: 1 },
     ]);
     expect(s.recentDecisions(10, "skip")).toHaveLength(1);
+    expect(s.hasDecision(id, "apply")).toBe(true);
+    expect(s.hasDecision(id, "edit")).toBe(false);
+    expect(s.hasDecision(999, "apply")).toBe(false);
   });
   it("kv", () => {
     const s = openStore(":memory:");

@@ -108,7 +108,20 @@ export const T = {
   runSummary: (found: number, cards: number) =>
     `סריקה הסתיימה: ${found} משרות חדשות, ${cards} מתאימות.`,
   noCvWarning: "יש משרות מתאימות אבל עוד אין קורות חיים. שלח /cv.",
-  digest: (counts: string) => `סיכום יומי:\n${counts}`,
+  digest: (counts: string) => `סיכום יומי (24 שעות):\n${counts}`,
+  noActivity: "אין פעילות",
+  statusLabels: {
+    new: "ממתינות לעיבוד",
+    duplicate: "כפולות",
+    filtered: "סוננו",
+    low_score: "התאמה נמוכה",
+    ready: "ממתינות לאישורך",
+    applying: "בתור לשליחה",
+    applied: "הוגשו",
+    manual: "הוגשו ידנית",
+    skipped: "דולגו",
+    failed: "נכשלו",
+  } as Record<string, string>,
   healthAlert: (problem: string) => `⚠️ ${problem}`,
   alertNoMessages: (hours: number) =>
     `לא הגיעו הודעות מהקבוצות כבר ${hours} שעות. ייתכן שהוואטסאפ תקוע.`,

@@ -158,14 +158,14 @@ export function startWhatsApp(opts: WhatsAppOptions): WhatsApp {
 
     current.ev.on("connection.update", async (u) => {
       opts.store.setKv(KV.lastEvent, now());
-      if ((u.qr || u.connection === "connecting") && !state.creds.registered) {
-        if (now() - lastPairingAt > PAIRING_INTERVAL_MS) {
+      // The socket is ready for a pairing request once it offers a QR code.
+      if (u.qr && !state.creds.registered && now() - lastPairingAt > PAIRING_INTERVAL_MS) {
+        try {
+          const code = await current.requestPairingCode(opts.phone);
           lastPairingAt = now();
-          try {
-            opts.onPairingCode(await current.requestPairingCode(opts.phone));
-          } catch (e) {
-            logger.warn({ err: e }, "pairing code request failed");
-          }
+          opts.onPairingCode(code);
+        } catch (e) {
+          logger.warn({ err: e }, "pairing code request failed");
         }
       }
       if (u.connection === "open") {
