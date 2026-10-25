@@ -17,7 +17,18 @@ export const T = {
   scanStarted: "מתחיל סריקה…",
   scanBusy: "סריקה כבר רצה כרגע.",
   noGroups: "עוד לא ראיתי אף קבוצה. ודא שהוואטסאפ מחובר.",
-  groupsTitle: "לחץ על קבוצה כדי להוסיף או להסיר אותה מהסריקה (✅ = נסרקת):",
+  groupsTitle: (total: number, selected: number, page: number, pages: number, filter: string) =>
+    [
+      `${total} קבוצות${filter ? ` שמתאימות ל-"${filter}"` : ""}, ${selected} נסרקות (✅).`,
+      "לחץ על קבוצה כדי להוסיף או להסיר אותה מהסריקה.",
+      pages > 1 ? `עמוד ${page + 1} מתוך ${pages}. לחיפוש לפי שם: /groups ואחריו מילה מהשם.` : "",
+    ]
+      .filter(Boolean)
+      .join("\n"),
+  noGroupsMatch: (filter: string) =>
+    `לא נמצאה קבוצה שהשם שלה מכיל "${filter}". שלח /groups בלי מילה לרשימה המלאה.`,
+  btnPrev: "◀️ הקודם",
+  btnNext: "הבא ▶️",
   profileTitle: "הפרופיל הנוכחי:",
   profileSaved: "הפרופיל נשמר.",
   profileInvalid: (err: string) => `הפרופיל לא נשמר:\n${err}`,

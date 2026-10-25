@@ -51,6 +51,7 @@ export interface CallbackResult {
 }
 
 export const MAX_CV_BYTES = 10 * 1024 * 1024;
+export const GROUPS_PER_PAGE = 20;
 
 /** Card message as a reply: rendered text plus its buttons. */
 export function cardReply(card: CardInput): Reply {
@@ -71,6 +72,8 @@ export function cardReply(card: CardInput): Reply {
 export class BotCore {
   private pendingEdit: number | null = null;
   private pendingSkip: number | null = null;
+  /** Name filter of the last /groups command, kept while paging and toggling. */
+  private groupFilter = "";
 
   constructor(private readonly h: BotHandlers) {}
 
@@ -132,7 +135,8 @@ export class BotCore {
         }
       }
       case "/groups":
-        return [await this.groupsReply()];
+        this.groupFilter = head.trim().split(/\s+/).slice(1).join(" ");
+        return [await this.groupsReply(0)];
       case "/cv":
         return [{ text: T.cvAsk }];
       default:
@@ -140,16 +144,32 @@ export class BotCore {
     }
   }
 
-  private async groupsReply(): Promise<Reply> {
-    const groups = await this.h.groups();
-    if (!groups.length) return { text: T.noGroups };
-    const buttons = groups.map((g) => [
-      {
-        text: `${g.allowed ? "✅" : "▫️"} ${g.name}`.slice(0, 60),
-        data: encodeAction({ type: "group", groupId: g.id }),
-      },
-    ]);
-    return { text: T.groupsTitle, buttons };
+  /** One page of the group list (Telegram allows at most 100 buttons per message). */
+  private async groupsReply(page: number): Promise<Reply> {
+    const all = await this.h.groups();
+    if (!all.length) return { text: T.noGroups };
+    const filter = this.groupFilter.toLowerCase();
+    const groups = filter ? all.filter((g) => g.name.toLowerCase().includes(filter)) : all;
+    if (!groups.length) return { text: T.noGroupsMatch(this.groupFilter) };
+    const pages = Math.ceil(groups.length / GROUPS_PER_PAGE);
+    const p = Math.min(Math.max(0, page), pages - 1);
+    const buttons: Buttons = groups
+      .slice(p * GROUPS_PER_PAGE, (p + 1) * GROUPS_PER_PAGE)
+      .map((g) => [
+        {
+          text: `${g.allowed ? "✅" : "▫️"} ${g.name}`.slice(0, 60),
+          data: encodeAction({ type: "group", groupId: g.id, page: p }),
+        },
+      ]);
+    const nav: Buttons[number] = [];
+    if (p > 0)
+      nav.push({ text: T.btnPrev, data: encodeAction({ type: "groupsPage", page: p - 1 }) });
+    if (p < pages - 1) {
+      nav.push({ text: T.btnNext, data: encodeAction({ type: "groupsPage", page: p + 1 }) });
+    }
+    if (nav.length) buttons.push(nav);
+    const selected = all.filter((g) => g.allowed).length;
+    return { text: T.groupsTitle(groups.length, selected, p, pages, this.groupFilter), buttons };
   }
 
   /** Handle a button press. Unknown or malformed data is ignored with a toast. */
@@ -199,7 +219,9 @@ export class BotCore {
         };
       case "group":
         this.h.toggleGroup(action.groupId);
-        return { replies: [await this.groupsReply()], removeButtons: true };
+        return { replies: [await this.groupsReply(action.page)], removeButtons: true };
+      case "groupsPage":
+        return { replies: [await this.groupsReply(action.page)], removeButtons: true };
     }
   }
 

@@ -144,6 +144,7 @@ export function startWhatsApp(opts: WhatsAppOptions): WhatsApp {
     const groups = await sock.groupFetchAllParticipating();
     const names = Object.fromEntries(Object.values(groups).map((g) => [g.id, g.subject]));
     opts.store.setKv(KV.groupNames, names);
+    console.log(`whatsapp: ${Object.keys(names).length} groups`);
   };
 
   const connect = async () => {

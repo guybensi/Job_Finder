@@ -118,7 +118,8 @@ export type Action =
   | { type: "apply" | "edit" | "skip" | "manual"; jobId: number }
   | { type: "skipReason"; jobId: number; reason: SkipReason }
   | { type: "cvSave" | "cvDiscard" }
-  | { type: "group"; groupId: string };
+  | { type: "group"; groupId: string; page: number }
+  | { type: "groupsPage"; page: number };
 
 const CODES = { apply: "a", edit: "e", skip: "s", manual: "m" } as const;
 
@@ -142,7 +143,10 @@ export function encodeAction(a: Action): string {
       out = "cv:discard";
       break;
     case "group":
-      out = `g:${a.groupId}`;
+      out = `g:${a.page}:${a.groupId}`;
+      break;
+    case "groupsPage":
+      out = `gp:${a.page}`;
       break;
     default:
       out = `${CODES[a.type]}:${a.jobId}`;
@@ -161,7 +165,10 @@ export function encodeAction(a: Action): string {
 export function decodeAction(data: string): Action | null {
   if (data === "cv:save") return { type: "cvSave" };
   if (data === "cv:discard") return { type: "cvDiscard" };
-  if (data.startsWith("g:") && data.length > 2) return { type: "group", groupId: data.slice(2) };
+  const page = data.match(/^gp:(\d{1,4})$/);
+  if (page) return { type: "groupsPage", page: Number(page[1]) };
+  const group = data.match(/^g:(\d{1,4}):(.+)$/);
+  if (group) return { type: "group", page: Number(group[1]), groupId: group[2]! };
   const parts = data.split(":");
   const jobId = Number(parts[1]);
   if (!Number.isSafeInteger(jobId) || jobId <= 0 || parts[1] !== String(jobId)) return null;

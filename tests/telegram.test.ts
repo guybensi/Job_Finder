@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { BotCore, isOwner, type BotHandlers, MAX_CV_BYTES } from "../src/telegram/bot.js";
+import {
+  BotCore,
+  GROUPS_PER_PAGE,
+  isOwner,
+  type BotHandlers,
+  MAX_CV_BYTES,
+} from "../src/telegram/bot.js";
 import {
   type CardInput,
   cardButtons,
@@ -102,7 +108,8 @@ describe("cards", () => {
       { type: "skipReason", jobId: 5, reason: "salary" },
       { type: "cvSave" },
       { type: "cvDiscard" },
-      { type: "group", groupId: "120363000000000000@g.us" },
+      { type: "group", groupId: "120363000000000000@g.us", page: 3 },
+      { type: "groupsPage", page: 2 },
     ] as const) {
       expect(decodeAction(encodeAction(a))).toEqual(a);
     }
@@ -120,10 +127,13 @@ describe("cards", () => {
       "r:1:bogus",
       "r:1",
       "g:",
+      "g:x:1@g.us",
+      "g:1",
+      "gp:x",
     ]) {
       expect(decodeAction(junk)).toBeNull();
     }
-    expect(() => encodeAction({ type: "group", groupId: "x".repeat(80) })).toThrow(/64/);
+    expect(() => encodeAction({ type: "group", groupId: "x".repeat(80), page: 0 })).toThrow(/64/);
   });
 });
 
@@ -162,7 +172,7 @@ describe("BotCore", () => {
     const core = new BotCore(h);
     const [r] = await core.handleText("/groups");
     expect(r!.buttons!.flat().map((b) => b.text)).toEqual(["✅ A", "▫️ B"]);
-    const res = await core.handleCallback("g:2@g.us");
+    const res = await core.handleCallback("g:0:2@g.us");
     expect(h.log).toContain("toggle:2@g.us");
     expect(res.replies[0]!.buttons).toBeDefined();
     expect(
@@ -253,5 +263,64 @@ describe("BotCore", () => {
         })
       )[0]!.text,
     ).toBe(T.cvFailed("net"));
+  });
+});
+
+function groupsCore(n: number) {
+  const allowed = new Set<string>();
+  const groups = Array.from({ length: n }, (_, i) => ({
+    id: `${i}@g.us`,
+    name: i % 2 ? `Jobs ${i}` : `Family ${i}`,
+  }));
+  const h = {
+    groups: async () => groups.map((g) => ({ ...g, allowed: allowed.has(g.id) })),
+    toggleGroup: (id: string) => void (allowed.has(id) ? allowed.delete(id) : allowed.add(id)),
+  } as unknown as BotHandlers;
+  return new BotCore(h);
+}
+const groupButtons = (r: { buttons?: { text: string; data: string }[][] }) =>
+  r.buttons!.flat().filter((b) => decodeAction(b.data)?.type === "group");
+const navButtons = (r: { buttons?: { text: string; data: string }[][] }) =>
+  r.buttons!.flat().filter((b) => decodeAction(b.data)?.type === "groupsPage");
+
+describe("groups paging and search", () => {
+  it("small list: one page, no nav", async () => {
+    const [r] = await groupsCore(3).handleText("/groups");
+    expect(groupButtons(r!)).toHaveLength(3);
+    expect(navButtons(r!)).toHaveLength(0);
+    expect(r!.text).toContain("3 קבוצות");
+  });
+  it("150 groups: pages of 20, all under 100 buttons, nav works", async () => {
+    const c = groupsCore(150);
+    const [r] = await c.handleText("/groups");
+    expect(r!.buttons!.flat().length).toBeLessThanOrEqual(100);
+    expect(groupButtons(r!)).toHaveLength(GROUPS_PER_PAGE);
+    expect(navButtons(r!).map((b) => b.data)).toEqual(["gp:1"]);
+    const last = await c.handleCallback("gp:7");
+    expect(groupButtons(last.replies[0]!)).toHaveLength(10);
+    expect(navButtons(last.replies[0]!).map((b) => b.data)).toEqual(["gp:6"]);
+    expect(last.replies[0]!.text).toContain("עמוד 8 מתוך 8");
+    const clamped = await c.handleCallback("gp:99");
+    expect(clamped.replies[0]!.text).toContain("עמוד 8 מתוך 8");
+  });
+  it("toggle keeps the page and marks the group", async () => {
+    const c = groupsCore(50);
+    const r = await c.handleCallback("g:1:25@g.us");
+    const btn = groupButtons(r.replies[0]!).find((b) => b.data === "g:1:25@g.us")!;
+    expect(btn.text.startsWith("✅")).toBe(true);
+    expect(r.replies[0]!.text).toContain("1 נסרקות");
+  });
+  it("search filters by name, case-insensitive, kept while paging; no match message", async () => {
+    const c = groupsCore(60);
+    const [r] = await c.handleText("/groups JOBS");
+    expect(groupButtons(r!).every((b) => b.text.includes("Jobs"))).toBe(true);
+    expect(r!.text).toContain('30 קבוצות שמתאימות ל-"JOBS"');
+    const p2 = await c.handleCallback("gp:1");
+    expect(groupButtons(p2.replies[0]!).every((b) => b.text.includes("Jobs"))).toBe(true);
+    expect((await c.handleText("/groups nothinglikethis"))[0]!.text).toBe(
+      T.noGroupsMatch("nothinglikethis"),
+    );
+    const [all] = await c.handleText("/groups");
+    expect(all!.text).toContain("60 קבוצות");
   });
 });
