@@ -105,6 +105,31 @@ export const T = {
     `קוד קישור לוואטסאפ: ${code}\nבטלפון: הגדרות ← מכשירים מקושרים ← קישור מכשיר ← קישור עם מספר טלפון.`,
   waConnected: "וואטסאפ מחובר ✅",
   waLoggedOut: "וואטסאפ התנתק (המכשיר הוסר). שלח /status ואעביר קוד קישור חדש בהפעלה הבאה.",
+  scanReport: (r: {
+    messages: number;
+    candidates: number;
+    jobs: number;
+    duplicates: number;
+    filtered: number;
+    lowScore: number;
+    ready: number;
+    waiting: number;
+  }) =>
+    [
+      "סריקה הסתיימה:",
+      `הודעות חדשות מהקבוצות: ${r.messages}`,
+      `נראו כמו מודעות דרושים: ${r.candidates}`,
+      `משרות חדשות: ${r.jobs} (כפולות: ${r.duplicates})`,
+      `סוננו לפי הפרופיל: ${r.filtered}`,
+      `התאמה נמוכה: ${r.lowScore}`,
+      `נשלחו אליך: ${r.ready}`,
+      r.waiting ? `ממתינות לסריקה הבאה: ${r.waiting}` : "",
+    ]
+      .filter(Boolean)
+      .join("\n"),
+  scanHintNoGroups: "לא נבחרו קבוצות לסריקה. שלח /groups וסמן קבוצות דרושים.",
+  scanHintNoMessages:
+    "לא הגיעו הודעות חדשות מהקבוצות שנבחרו מאז הסריקה הקודמת. נסרקות רק הודעות שנשלחו אחרי חיבור הוואטסאפ ואחרי סימון הקבוצה.",
   runSummary: (found: number, cards: number) =>
     `סריקה הסתיימה: ${found} משרות חדשות, ${cards} מתאימות.`,
   noCvWarning: "יש משרות מתאימות אבל עוד אין קורות חיים. שלח /cv.",

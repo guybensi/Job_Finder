@@ -356,3 +356,34 @@ describe("group list refresh", () => {
     expect(calls).toBe(1);
   });
 });
+
+describe("manual scan report", () => {
+  it("scheduled run with nothing new is silent", async () => {
+    const s = setup();
+    await s.app.runOnce();
+    expect(s.notes).toEqual([]);
+  });
+  it("manual scan with no groups explains why", async () => {
+    const s = setup();
+    await s.app.runOnce(true);
+    expect(s.notes).toHaveLength(1);
+    expect(s.notes[0]).toContain("סריקה הסתיימה");
+    expect(s.notes[0]).toContain(T.scanHintNoGroups);
+  });
+  it("manual scan with groups but no messages", async () => {
+    const s = setup();
+    s.store.setKv(KV.allowedGroups, ["g@g.us"]);
+    await s.app.runOnce(true);
+    expect(s.notes[0]).toContain(T.scanHintNoMessages);
+  });
+  it("manual scan that finds a job reports once, with counts", async () => {
+    const s = setup();
+    s.store.setKv(KV.allowedGroups, ["g@g.us"]);
+    s.seed();
+    await s.app.runOnce(true);
+    expect(s.notes).toHaveLength(1);
+    expect(s.notes[0]).toContain("נשלחו אליך: 1");
+    expect(s.notes[0]).not.toContain(T.scanHintNoMessages);
+    expect(s.cards).toHaveLength(1);
+  });
+});

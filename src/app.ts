@@ -44,7 +44,7 @@ export interface AppDeps {
 export interface App {
   handlers: BotHandlers;
   /** One pipeline run, or `null` if one is already running. */
-  runOnce(): Promise<RunReport | null>;
+  runOnce(manual?: boolean): Promise<RunReport | null>;
   /** Housekeeping: daily digest, health alerts, purge of old messages. */
   tick(): Promise<void>;
   isPaused(): boolean;
@@ -132,7 +132,11 @@ export function createApp(d: AppDeps): App {
   // Applications approved before a restart are still waiting.
   for (const job of d.store.jobsByStatus("applying")) queue.push(job.id);
 
-  const runOnce = async (): Promise<RunReport | null> => {
+  /**
+   * One pipeline run. Scheduled runs stay quiet unless they found something; a manual `/scan`
+   * always reports, so the owner knows it finished and why nothing came out.
+   */
+  const runOnce = async (manual = false): Promise<RunReport | null> => {
     const run = lock.tryRun(async () => {
       const master = loadMaster(dataDir);
       const report = await runPipeline({
@@ -145,7 +149,12 @@ export function createApp(d: AppDeps): App {
         now,
       });
       d.store.setKv("last_run", { at: now(), errors: report.errors });
-      if (report.ready > 0 || report.errors.length) {
+      if (manual) {
+        const groups = d.store.getKv<string[]>(KV.allowedGroups, []).length;
+        const hint =
+          groups === 0 ? T.scanHintNoGroups : report.messages === 0 ? T.scanHintNoMessages : "";
+        await d.notify([T.scanReport(report), hint].filter(Boolean).join("\n\n"));
+      } else if (report.ready > 0 || report.errors.length) {
         await d.notify(T.runSummary(report.jobs, report.ready));
       }
       for (const err of report.errors.slice(0, 3)) await d.notify(T.alertRunFailed(err));
@@ -182,7 +191,7 @@ export function createApp(d: AppDeps): App {
     },
     scan() {
       if (lock.running) return false;
-      void runOnce().catch((e) => d.notify(T.alertRunFailed((e as Error).message)));
+      void runOnce(true).catch((e) => d.notify(T.alertRunFailed((e as Error).message)));
       return true;
     },
     setPaused: (paused) => d.store.setKv("paused", paused),
