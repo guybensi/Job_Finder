@@ -45,6 +45,7 @@ export const T = {
   cardSource: (group: string) => `מקור: ${group}`,
   cardSalaryUnknown: "שכר לא צוין",
   cardCvVariant: (v: string) => `גרסת קו״ח: ${v}`,
+  cvNotTailored: "קורות החיים לא הותאמו למשרה (תצורף הגרסה המקורית)",
   btnApply: "✅ הגש",
   btnEdit: "✏️ ערוך הודעה",
   btnSkip: "⏭ דלג",
