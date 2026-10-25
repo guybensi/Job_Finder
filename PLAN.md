@@ -79,45 +79,53 @@ Claude Code session with a Monitor.
 ```
 src/
   config.ts            env + profile loading/validation
-  store/               SQLite schema, migrations, queries
+  store.ts             SQLite: messages, jobs, decisions, kv
+  llm.ts               Claude client (structured output), FakeLlm, quoteData
   whatsapp/listener.ts Baileys connection, allow-list, writes messages
-  telegram/bot.ts      owner-only bot: commands, approval cards, CV upload
-  pipeline/classify.ts is it a job post? (cheap model, batched)
-  pipeline/extract.ts  JobPost fields from a post
+  telegram/            bot.ts (BotCore + grammy wiring), cards.ts, texts.ts (Hebrew)
+  pipeline/prefilter.ts cheap keyword/email check before the model
+  pipeline/extract.ts  JobPost fields from a batch of posts (also decides "is it a job post")
   pipeline/dedupe.ts   fingerprint + similarity
   pipeline/match.ts    hard filters + model score with reasons
-  cv/master.ts         CV upload → structured cv.json
-  cv/tailor.ts         job + master → tailored CV (validated)
+  pipeline/run.ts      one scheduled run: messages → cards
+  cv/master.ts         CV upload → merged master cv.json
+  cv/tailor.ts         job + master → tailored CV, validateTailored
   cv/render.ts         tailored CV → PDF
-  apply/email.ts       send application with attachment
-  scheduler.ts         periodic runs, digest, health
-  health.ts            /healthz, heartbeat, recency alerts
-  main.ts              wires it all together
-profile.example.yaml   role, skills, salary, regions, exclusions, languages
-tests/                 <module>.test.ts per module
+  apply/email.ts       application email + human-paced send queue
+  scheduler.ts         run lock, timers, digest timing
+  health.ts            health alerts (message recency), /healthz
+  app.ts               bot handlers, runs, sending, housekeeping (all deps injected)
+  main.ts              wires the real services together
+tests/                 <module>.test.ts per module, fictional fixtures in tests/fixtures
 ```
 
 ## Modules and public functions
 
-- **config**: `loadConfig()` — env vars (secrets) + `profile.yaml` from `/data`, validated with zod.
-- **store**: `openStore(path)`, `insertMessage`, `pendingMessages`, `upsertJob`, `recordDecision`,
-  `purgeOldMessages`.
-- **whatsapp/listener**: `startWhatsApp(store, opts)` — pairing code sent to Telegram, allow-listed
-  groups only, heartbeat.
-- **telegram/bot**: `startBot(store, opts)` — `/status`, `/groups`, `/profile`, `/cv`, `/scan`,
-  `/pause`; approval cards with Apply/Edit/Skip; rejects any sender but the owner id.
-- **pipeline/classify**: `classifyBatch(messages)` → which are job posts.
-- **pipeline/extract**: `extractJob(text)` → `JobPost` (title, company, location, salary range,
-  seniority, requirements, apply channel: email / phone / link, language).
-- **pipeline/dedupe**: `fingerprint(job)`, `isDuplicate(job, recent)`.
-- **pipeline/match**: `hardFilter(job, profile)` (deterministic), `scoreMatch(job, profile, cv,
-learnedPrefs)` → score 0–100 + reasons.
-- **cv/master**: `parseUploadedCv(file)` → `MasterCv` (owner confirms on Telegram).
-- **cv/tailor**: `tailorCv(master, job)` → `TailoredCv`; `validateTailored(master, tailored)`.
-- **cv/render**: `renderPdf(doc)`.
-- **apply/email**: `sendApplication(job, files, message)` via SMTP (Gmail app password).
-- **scheduler**: `startScheduler(deps, intervalMin)`.
-- **health**: `startHealthServer(port)`, `checkRecency(store)`.
+- **config**: `loadEnv`, `loadProfile`, `saveProfile`, `parseProfile`.
+- **store**: `openStore(path)` → `insertMessage`, `pendingMessages`, `markProcessed`, `purgeOldMessages`,
+  `insertJob`, `updateJob`, `jobsByStatus`, `jobsSince`, `recordDecision`, `hasDecision`,
+  `recentDecisions`, `getKv`/`setKv`.
+- **llm**: `Llm.json({ model, system, prompt, schema, pdfs })`; `AnthropicLlm`, `FakeLlm`, `quoteData`.
+- **whatsapp/listener**: `startWhatsApp(opts)` — pairing code sent to Telegram, allow-listed groups
+  only; pure helpers `extractText`, `toNewMessage`.
+- **telegram/bot**: `startBot(token, ownerId, handlers)`; `BotCore` holds the conversation logic
+  (`/status`, `/scan`, `/pause`, `/resume`, `/groups`, `/profile`, `/setprofile`, `/cv`, Apply / Edit /
+  Skip with reasons); any sender but the owner, or a non-private chat, is ignored.
+- **pipeline/prefilter**: `looksLikeJobPost(text)`.
+- **pipeline/extract**: `extractJobs(llm, model, messages)` → jobs per message; `verifyApply` keeps
+  only apply targets that appear in the text.
+- **pipeline/dedupe**: `fingerprint(job)`, `findDuplicate(job, recent)`.
+- **pipeline/match**: `hardFilter(job, profile)`, `fullTimeMonthly`, `scoreMatch(llm, model, job, ctx)`,
+  `formatLearned(skips)`.
+- **pipeline/run**: `runPipeline(deps)`, `toCard(job, master)`.
+- **cv/master**: `parseCv(llm, model, pdf)`, `mergeCv(master, parsed)`, `sourceWarnings`, `cvForPrompt`.
+- **cv/tailor**: `tailorCv(llm, model, master, job, variant)` (one retry, then the untouched variant);
+  `validateTailored(master, tailored, job)`.
+- **cv/render**: `renderPdf(master, tailored)`.
+- **apply/email**: `buildApplication`, `createMailer`, `ApplyQueue`.
+- **scheduler**: `Lock`, `isDigestDue`, `startScheduler`.
+- **health**: `checkHealth`, `throttleAlerts`, `startHealthServer`.
+- **app**: `createApp(deps)` → `handlers`, `runOnce`, `tick`, `queue`.
 
 ## Dependencies
 

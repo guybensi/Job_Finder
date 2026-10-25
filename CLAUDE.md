@@ -10,14 +10,18 @@ volume. Design, decisions and build order: `PLAN.md`. Reply to the user in Hebre
 ```
 src/config.ts          env + profile (zod)
 src/store.ts           SQLite (node:sqlite): messages, jobs, decisions, kv
-src/llm.ts             Claude client wrapper (structured output); tests use a fake
+src/llm.ts             Claude client wrapper (structured output); tests use FakeLlm
 src/pipeline/          prefilter, extract, dedupe, match, run (the scheduled pipeline)
 src/cv/                master (parse uploaded CVs), tailor (+ validator), render (PDF)
 src/apply/email.ts     SMTP application
 src/telegram/          owner-only bot, approval cards, texts
 src/whatsapp/          Baileys listener (read-only, allow-listed groups)
-src/scheduler.ts, src/health.ts, src/main.ts
-tests/<module>.test.ts one file per module
+src/scheduler.ts, src/health.ts
+src/app.ts             bot handlers, runs, sending, housekeeping; every service injected (tested)
+src/main.ts            wires real services only (no logic worth testing)
+tests/<module>.test.ts one file per module (telegram/* → telegram.test.ts); fixtures are fictional
+scripts/select-tests.mjs  CI: which tests to run (`vitest related` on changed files)
+Dockerfile, railway.json  one service, volume mounted at /data
 ```
 
 ## Commands
@@ -39,6 +43,9 @@ pnpm build && pnpm start
 - Keep model calls behind `Llm` so tests never hit the API. Model ids come from env
   (default `claude-opus-5-5`).
 - Bot texts are Hebrew and live in `src/telegram/texts.ts`.
+- Sending is guarded twice: status `applying` and a recorded `apply` decision (`Store.hasDecision`).
+- The tool input turns `\uXXXX` into real characters; write regex escapes via a script if needed
+  (eslint rejects irregular whitespace).
 
 ## Rules (from assistant-architecture, kept on purpose)
 
