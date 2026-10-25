@@ -18,12 +18,13 @@ Claude Code session with a Monitor.
 ## Scope
 
 **In scope (v1)**
+
 - WhatsApp listener (owner's own account, linked device) on an allow-list of groups. Read only.
 - Telegram bot that answers only the owner's numeric id: approvals, status, settings, CV upload.
 - Scheduled pipeline (default every 60 minutes): classify messages → extract job posts →
   deduplicate (the same job is reposted across groups) → match against the profile.
 - Master CV: the owner uploads a CV once; it becomes a structured `cv.json` the owner confirms.
-- Tailored CV per job (DOCX, PDF if decided below) + a short cover message.
+- Tailored CV per job (PDF) + a short cover message.
 - Approval card on Telegram: job summary, why it matches, the tailored CV, the draft message,
   and buttons **Apply / Edit / Skip**. Nothing is sent without Apply.
 - Apply by email (the most common call to action in group posts). Posts that say "apply via
@@ -32,6 +33,7 @@ Claude Code session with a Monitor.
 - Daily digest, health alerts (WhatsApp disconnected, no job posts seen for 24 h).
 
 **Out of scope (v1)**
+
 - Automatic applications without approval.
 - Filling web forms / ATS sites (LinkedIn, Comeet, etc.) — later, maybe.
 - Scraping job sites. Only WhatsApp groups for now.
@@ -86,13 +88,13 @@ src/
   pipeline/match.ts    hard filters + model score with reasons
   cv/master.ts         CV upload → structured cv.json
   cv/tailor.ts         job + master → tailored CV (validated)
-  cv/render.ts         tailored CV → DOCX (+ PDF)
+  cv/render.ts         tailored CV → PDF
   apply/email.ts       send application with attachment
   scheduler.ts         periodic runs, digest, health
   health.ts            /healthz, heartbeat, recency alerts
   main.ts              wires it all together
 profile.example.yaml   role, skills, salary, regions, exclusions, languages
-tests/                 test_<module>.test.ts per module
+tests/                 <module>.test.ts per module
 ```
 
 ## Modules and public functions
@@ -109,10 +111,10 @@ tests/                 test_<module>.test.ts per module
   seniority, requirements, apply channel: email / phone / link, language).
 - **pipeline/dedupe**: `fingerprint(job)`, `isDuplicate(job, recent)`.
 - **pipeline/match**: `hardFilter(job, profile)` (deterministic), `scoreMatch(job, profile, cv,
-  learnedPrefs)` → score 0–100 + reasons.
+learnedPrefs)` → score 0–100 + reasons.
 - **cv/master**: `parseUploadedCv(file)` → `MasterCv` (owner confirms on Telegram).
 - **cv/tailor**: `tailorCv(master, job)` → `TailoredCv`; `validateTailored(master, tailored)`.
-- **cv/render**: `renderDocx(tailored)`, `renderPdf(tailored)`.
+- **cv/render**: `renderPdf(doc)`.
 - **apply/email**: `sendApplication(job, files, message)` via SMTP (Gmail app password).
 - **scheduler**: `startScheduler(deps, intervalMin)`.
 - **health**: `startHealthServer(port)`, `checkRecency(store)`.
@@ -125,11 +127,11 @@ tests/                 test_<module>.test.ts per module
 - `grammy` — Telegram bot.
 - `@anthropic-ai/sdk` — Claude API. Cheap model for classify/extract, stronger model for
   match and tailoring; model ids come from env.
-- `better-sqlite3` — the store.
+- `node:sqlite` (built into Node 24) — the store, no native build step.
 - `zod` — config and model-output validation.
-- `docx` — DOCX rendering with RTL support. PDF: see Open questions.
+- `pdfkit` — CV PDF rendering.
 - `nodemailer` — SMTP.
-- `mammoth` / `pdf-parse` — read the uploaded CV.
+- `unpdf` — read the uploaded CV PDFs.
 
 ## Configuration (Railway variables, never in git)
 
@@ -157,15 +159,24 @@ Non-secret preferences live in `/data/profile.yaml` and are edited through the b
 - **Cost.** Classification is batched with a cheap model; tailoring runs only for jobs that pass
   the hard filters.
 
-## Open questions (need Guy's answer before code)
+## Decisions (2026-10-25)
 
-1. **Language:** TypeScript (one process, Baileys native, same tools as Sagarnu) — recommended —
-   or Python (WhatsApp listener would then be a separate Node service plus Postgres)?
-2. **WhatsApp number:** owner's main number or a secondary one?
+1. **Language:** TypeScript, one Node process.
+2. **WhatsApp number:** the owner's main number, linked as a device with a pairing code.
+   The number is a Railway variable (`WA_PHONE`), never in git.
 3. **CV:** the owner has two English CV variants. Both are merged into one master CV with item ids;
    for each job the tailor starts from the closer variant and selects/rewords items. Output: **PDF**
    rendered with `pdfkit` (English text, so no RTL shaping and no LibreOffice needed). The cover
    message follows the post's language.
-4. **Apply channels in v1:** email only (recommended), or also WhatsApp DM to the recruiter?
-5. **Profile:** roles, skills, salary floor, regions/commute, remote/hybrid, exclusions —
-   collected on Telegram at first run, or written into `profile.yaml` now.
+4. **Apply channels in v1:** email only; link/form posts get a manual card.
+5. **Profile:** set by the owner through the bot (`/setprofile`) and stored only in `/data/profile.yaml`:
+   job types (student / full-time), regions (plus remote/hybrid), a monthly salary floor and a
+   preferred salary; student jobs are judged pro-rata by scope. The values stay out of git; the
+   code ships a neutral default that filters nothing.
+6. **Models:** `claude-opus-5-5` for every call by default; `MODEL_EXTRACT` and `MODEL_TAILOR`
+   variables can switch a step to a cheaper model later.
+
+## Privacy rule (the repo is public)
+
+No personal data in git: no CV, phone, email, salary, profile or group names. They live only on
+the Railway volume and are uploaded through the bot. Tests use fictional fixtures.
