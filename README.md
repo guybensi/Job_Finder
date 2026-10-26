@@ -43,7 +43,7 @@ pnpm dev
 | `SMTP_USER`, `SMTP_APP_PASSWORD` | Gmail address and an app password (optional; without them only manual applying) |
 | `DATA_DIR`                       | data directory (`/data` on Railway)                                             |
 | `SCAN_INTERVAL_MIN`              | minutes between scans (default 60)                                              |
-| `MODEL_EXTRACT`, `MODEL_TAILOR`  | model ids (default `claude-opus-5-5`)                                           |
+| `MODEL_EXTRACT`, `MODEL_TAILOR`  | model ids (default `claude-haiku-5-5`)                                          |
 
 ### First run (on Telegram)
 

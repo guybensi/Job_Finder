@@ -19,7 +19,7 @@ describe("loadEnv", () => {
     const env = loadEnv(baseEnv);
     expect(env.TELEGRAM_OWNER_ID).toBe(42);
     expect(env.SCAN_INTERVAL_MIN).toBe(60);
-    expect(env.MODEL_TAILOR).toBe("claude-opus-5-5");
+    expect(env.MODEL_TAILOR).toBe("claude-haiku-5-5");
     expect(env.DATA_DIR).toBe("./data");
   });
 

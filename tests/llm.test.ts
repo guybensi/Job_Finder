@@ -1,7 +1,7 @@
 import type Anthropic from "@anthropic-ai/sdk";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { AnthropicLlm, FakeLlm, LlmError, quoteData } from "../src/llm.js";
+import { AnthropicLlm, FakeLlm, LlmError, quoteData, supportsServerFallback } from "../src/llm.js";
 
 const schema = z.object({ ok: z.boolean() });
 const req = { model: "m", system: "sys", prompt: "p", schema };
@@ -56,5 +56,22 @@ describe("llm", () => {
     expect(quoteData("post", "")).toBe("<post>\n\n</post>");
     expect(quoteData("post", "<postal> code")).toBe("<post>\n< postal> code\n</post>");
     expect(() => quoteData("bad tag", "x")).toThrow(/invalid tag/);
+  });
+});
+
+describe("server-side fallback by model", () => {
+  it("only non-Haiku models get fallbacks", () => {
+    expect(supportsServerFallback("claude-opus-5-5")).toBe(true);
+    expect(supportsServerFallback("claude-haiku-5-5")).toBe(false);
+    expect(supportsServerFallback(" Claude-Haiku-5-5 ")).toBe(false);
+  });
+  it("haiku requests carry no fallbacks or betas", async () => {
+    const seen: Record<string, unknown>[] = [];
+    const llm = new AnthropicLlm(
+      clientReturning({ stop_reason: "end_turn", parsed_output: { ok: true } }, seen),
+    );
+    await llm.json({ ...req, model: "claude-haiku-5-5" });
+    expect("fallbacks" in seen[0]!).toBe(false);
+    expect("betas" in seen[0]!).toBe(false);
   });
 });

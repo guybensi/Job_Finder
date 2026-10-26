@@ -160,7 +160,7 @@ Return:
  * Score a job against the profile and CV with the model.
  *
  * Example:
- *   await scoreMatch(llm, "claude-opus-5-5", jobPost(), ctx)
+ *   await scoreMatch(llm, "claude-haiku-5-5", jobPost(), ctx)
  *   // → { score: 84, reasons: ["ניסיון ב-Python ו-FastAPI"], concerns: [], variant: "llm" }
  *
  * @returns The score clamped to 0–100 and rounded; an unknown variant falls back to the first.

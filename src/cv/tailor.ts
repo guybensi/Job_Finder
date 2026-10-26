@@ -259,7 +259,7 @@ export interface TailorResult {
  * are returned, so a card can always be shown.
  *
  * Example:
- *   await tailorCv(llm, "claude-opus-5-5", master, job, "backend-engineer-python")
+ *   await tailorCv(llm, "claude-haiku-5-5", master, job, "backend-engineer-python")
  *   // → { tailored: { variant: "backend-engineer-python", items: [...], coverMessage: "..." },
  *   //     errors: [], fallback: false }
  *

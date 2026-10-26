@@ -41,7 +41,7 @@ pnpm build && pnpm start
 - Work on `main`; ask before creating a branch. Conventional commits (`feat(cv): ...`).
   Commit per finished module, push at milestones, run `pnpm check` before every commit.
 - Keep model calls behind `Llm` so tests never hit the API. Model ids come from env
-  (default `claude-opus-5-5`).
+  (default `claude-haiku-5-5`; Haiku has no server-side fallback, see `supportsServerFallback`).
 - Bot texts are Hebrew and live in `src/telegram/texts.ts`.
 - Sending is guarded twice: status `applying` and a recorded `apply` decision (`Store.hasDecision`).
 - The tool input turns `\uXXXX` into real characters; write regex escapes via a script if needed

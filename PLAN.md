@@ -181,8 +181,9 @@ Non-secret preferences live in `/data/profile.yaml` and are edited through the b
    job types (student / full-time), regions (plus remote/hybrid), a monthly salary floor and a
    preferred salary; student jobs are judged pro-rata by scope. The values stay out of git; the
    code ships a neutral default that filters nothing.
-6. **Models:** `claude-opus-5-5` for every call by default; `MODEL_EXTRACT` and `MODEL_TAILOR`
-   variables can switch a step to a cheaper model later.
+6. **Models:** `claude-haiku-5-5` for every call by default (changed 2026-10-26 from
+   `claude-opus-5-5` to cut cost); `MODEL_EXTRACT` and `MODEL_TAILOR` can switch a step back to a
+   stronger model, e.g. tailoring to `claude-opus-5-5`.
 
 ## Privacy rule (the repo is public)
 

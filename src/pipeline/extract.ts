@@ -95,7 +95,7 @@ export function verifyApply(apply: JobPost["apply"], text: string): JobPost["app
  * Extract job posts from a batch of messages with one model call.
  *
  * Example:
- *   await extractJobs(llm, "claude-opus-5-5", [{ id: 1, text: "Hiring a backend dev, cv@x.com" }])
+ *   await extractJobs(llm, "claude-haiku-5-5", [{ id: 1, text: "Hiring a backend dev, cv@x.com" }])
  *   // → Map { 1 => [{ title: "Backend Developer", apply: { kind: "email", target: "cv@x.com" }, ... }] }
  *
  * @param llm The model client.

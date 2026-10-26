@@ -24,14 +24,26 @@ export interface Llm {
 export class LlmError extends Error {}
 
 /**
+ * Whether the API can retry a declined request on a fallback model (`fallbacks: "default"`).
+ * Haiku models have no server-side fallback, so the parameter is left out for them.
+ *
+ * Example:
+ *   supportsServerFallback("claude-opus-5-5")   // → true
+ *   supportsServerFallback("claude-haiku-5-5")  // → false
+ */
+export function supportsServerFallback(model: string): boolean {
+  return !model.trim().toLowerCase().startsWith("claude-haiku");
+}
+
+/**
  * `Llm` backed by the Claude API with structured output.
  *
- * Uses `fallbacks: "default"` so a request declined by a safety classifier is retried
- * server-side on the recommended fallback model instead of failing.
+ * On models that support it, uses `fallbacks: "default"` so a request declined by a safety
+ * classifier is retried server-side on the recommended fallback model instead of failing.
  *
  * Example:
  *   const llm = new AnthropicLlm(new Anthropic());
- *   await llm.json({ model: "claude-opus-5-5", system: "...", prompt: "...",
+ *   await llm.json({ model: "claude-haiku-5-5", system: "...", prompt: "...",
  *                    schema: z.object({ ok: z.boolean() }) });   // → { ok: true }
  *
  * @throws LlmError when the model refuses, is cut off, or returns output that fails the schema.
@@ -49,8 +61,9 @@ export class AnthropicLlm implements Llm {
     const response = await this.client.beta.messages.parse({
       model: req.model,
       max_tokens: req.maxTokens ?? 16000,
-      betas: ["server-side-fallback-2026-07-01"],
-      fallbacks: "default",
+      ...(supportsServerFallback(req.model)
+        ? { betas: ["server-side-fallback-2026-07-01"], fallbacks: "default" as const }
+        : {}),
       system: [{ type: "text", text: req.system, cache_control: { type: "ephemeral" } }],
       messages: [{ role: "user", content }],
       output_config: { format: betaZodOutputFormat(req.schema), effort: req.effort ?? "medium" },

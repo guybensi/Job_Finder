@@ -3,7 +3,7 @@ import path from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { z } from "zod";
 
-export const DEFAULT_MODEL = "claude-opus-5-5";
+export const DEFAULT_MODEL = "claude-haiku-5-5";
 
 const EnvSchema = z.object({
   TELEGRAM_BOT_TOKEN: z.string().min(1),
