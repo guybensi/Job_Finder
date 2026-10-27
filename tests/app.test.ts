@@ -57,7 +57,7 @@ function setup(
       return {
         results: ids.map((id) => ({
           messageId: id,
-          jobs: [opts.post ?? jobPost({ region: "center" })],
+          jobs: [{ relevant: true, ...(opts.post ?? jobPost({ region: "center" })) }],
         })),
       };
     }

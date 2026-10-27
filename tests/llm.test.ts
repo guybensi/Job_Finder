@@ -1,7 +1,15 @@
 import type Anthropic from "@anthropic-ai/sdk";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { AnthropicLlm, FakeLlm, LlmError, quoteData, supportsServerFallback } from "../src/llm.js";
+import {
+  AnthropicLlm,
+  estimateCostUsd,
+  FakeLlm,
+  LlmError,
+  quoteData,
+  supportsServerFallback,
+  type UsageRecord,
+} from "../src/llm.js";
 
 const schema = z.object({ ok: z.boolean() });
 const req = { model: "m", system: "sys", prompt: "p", schema };
@@ -73,5 +81,71 @@ describe("server-side fallback by model", () => {
     await llm.json({ ...req, model: "claude-haiku-5-5" });
     expect("fallbacks" in seen[0]!).toBe(false);
     expect("betas" in seen[0]!).toBe(false);
+  });
+});
+
+const usage = {
+  input_tokens: 1000,
+  output_tokens: 200,
+  cache_read_input_tokens: 3000,
+  cache_creation_input_tokens: null,
+};
+const hreq = { ...req, model: "claude-haiku-5-5" };
+const none = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+
+describe("estimateCostUsd", () => {
+  it("prices input, output and cache by model", () => {
+    expect(estimateCostUsd("claude-haiku-5-5", { ...none, input: 1_000_000 })).toBeCloseTo(0.1);
+    expect(estimateCostUsd("claude-haiku-5-5", { ...none, output: 1_000_000 })).toBeCloseTo(0.5);
+    expect(
+      estimateCostUsd("claude-haiku-5-5", { ...none, cacheRead: 1_000_000, cacheWrite: 1_000_000 }),
+    ).toBeCloseTo(0.01 + 0.125);
+    expect(
+      estimateCostUsd("claude-opus-5-5", { ...none, input: 1_000_000, output: 1_000_000 }),
+    ).toBeCloseTo(24);
+    expect(estimateCostUsd("claude-opus-5", { ...none, input: 1_000_000 })).toBeCloseTo(5);
+    expect(estimateCostUsd("mystery", { ...none, input: 1 })).toBeNull();
+  });
+});
+
+describe("context caching and usage", () => {
+  it("context goes after system with the cache marker; without it the marker is on system", async () => {
+    const seen: Record<string, unknown>[] = [];
+    const llm = new AnthropicLlm(
+      clientReturning({ stop_reason: "end_turn", parsed_output: { ok: true }, usage }, seen),
+    );
+    await llm.json({ ...hreq, context: "CV TEXT" });
+    await llm.json(hreq);
+    expect(seen[0]!.system).toEqual([
+      { type: "text", text: "sys" },
+      { type: "text", text: "CV TEXT", cache_control: { type: "ephemeral" } },
+    ]);
+    expect(seen[1]!.system).toEqual([
+      { type: "text", text: "sys", cache_control: { type: "ephemeral" } },
+    ]);
+  });
+  it("reports usage with its label, also for a refusal", async () => {
+    const records: UsageRecord[] = [];
+    const ok = new AnthropicLlm(
+      clientReturning({ stop_reason: "end_turn", parsed_output: { ok: true }, usage }),
+      (u) => records.push(u),
+    );
+    await ok.json({ ...hreq, label: "match" });
+    const refused = new AnthropicLlm(
+      clientReturning({ stop_reason: "refusal", stop_details: null, usage }),
+      (u) => records.push(u),
+    );
+    await expect(refused.json(hreq)).rejects.toThrow(/refused/);
+    const expected = {
+      model: "claude-haiku-5-5",
+      input: 1000,
+      output: 200,
+      cacheRead: 3000,
+      cacheWrite: 0,
+    };
+    expect(records).toEqual([
+      { label: "match", ...expected },
+      { label: "llm", ...expected },
+    ]);
   });
 });

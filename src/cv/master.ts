@@ -100,6 +100,7 @@ export async function parseCv(llm: Llm, model: string, pdf: Buffer): Promise<Par
     prompt: `Extracted text of the attached CV:\n${quoteData("cv", text)}`,
     pdfs: [pdf],
     schema: ParsedCvSchema,
+    label: "cv",
   });
 }
 
@@ -269,6 +270,31 @@ export function cvForPrompt(master: MasterCv): string {
       );
       for (const b of i.bullets) lines.push(`  - ${b}`);
     }
+  }
+  return lines.join("\n");
+}
+
+/**
+ * A short CV for scoring a job: variant summaries, every item's heading, and the skills lines.
+ * Experience bullets are left out; they only matter when tailoring. About a third of the size
+ * of `cvForPrompt`.
+ *
+ * Example:
+ *   cvForMatch(master)
+ *   // → "Variant backend-engineer-python: Backend Engineer (Python/APIs) — Backend engineer ...\n
+ *   //    experience: Software Engineer (Acme Analytics, 2022 – 2024)\n...\nskills: Languages: Python, ..."
+ */
+export function cvForMatch(master: MasterCv): string {
+  const lines = master.variants.map((v) => `Variant ${v.id}: ${v.headline} — ${v.summary}`);
+  for (const section of SECTIONS) {
+    const items = master.items.filter((i) => i.section === section);
+    if (!items.length) continue;
+    const entries = items.map((i) => {
+      if (section === "skills") return `${i.heading}: ${i.bullets.join("; ")}`;
+      const meta = [i.subheading, i.dates].filter(Boolean).join(", ");
+      return `${i.heading}${meta ? ` (${meta})` : ""}`;
+    });
+    lines.push(`${section}: ${entries.join(" | ")}`);
   }
   return lines.join("\n");
 }

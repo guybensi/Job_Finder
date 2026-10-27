@@ -139,3 +139,21 @@ describe("store", () => {
     expect(openStore(file).pendingMessages(10)).toHaveLength(1);
   });
 });
+
+describe("hasProcessedText", () => {
+  it("only processed, trimmed", () => {
+    const s = openStore(":memory:");
+    s.insertMessage({
+      waId: "a",
+      groupId: "g",
+      groupName: "G",
+      sender: "x",
+      text: " hello job post ",
+      ts: 1,
+    });
+    expect(s.hasProcessedText("hello job post")).toBe(false);
+    s.markProcessed([s.pendingMessages(1)[0]!.id]);
+    expect(s.hasProcessedText("hello job post")).toBe(true);
+    expect(s.hasProcessedText("other")).toBe(false);
+  });
+});

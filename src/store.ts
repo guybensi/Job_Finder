@@ -187,6 +187,18 @@ export class Store {
     this.transaction(() => ids.forEach((id) => stmt.run(id)));
   }
 
+  /**
+   * Whether a message with exactly this text (trimmed) was already processed, e.g. the same post
+   * forwarded to another group, so it does not go to the model twice.
+   */
+  hasProcessedText(text: string): boolean {
+    return (
+      this.db
+        .prepare("SELECT 1 FROM messages WHERE processed = 1 AND trim(text) = ? LIMIT 1")
+        .get(text.trim()) !== undefined
+    );
+  }
+
   /** Timestamp of the newest stored message, or `null` if there are none. */
   lastMessageAt(): number | null {
     const r = this.db.prepare("SELECT MAX(ts) AS ts FROM messages").get();

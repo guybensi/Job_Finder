@@ -80,15 +80,20 @@ describe("extractJobs", () => {
   it("maps results, ignores unknown ids, fills missing with []", async () => {
     const llm = new FakeLlm(() => ({
       results: [
-        { messageId: 1, jobs: [jobPost({ apply: { kind: "email", target: "invented@x.com" } })] },
-        { messageId: 99, jobs: [jobPost()] },
+        {
+          messageId: 1,
+          jobs: [
+            { ...jobPost({ apply: { kind: "email", target: "invented@x.com" } }), relevant: true },
+          ],
+        },
+        { messageId: 99, jobs: [{ ...jobPost(), relevant: true }] },
       ],
     }));
     const out = await extractJobs(llm, "m", [
       { id: 1, text: POST_HE },
       { id: 2, text: "chit chat" },
     ]);
-    expect(out.get(1)![0]!.apply.target).toBe("jobs@example.com");
+    expect(out.get(1)![0]!.post.apply.target).toBe("jobs@example.com");
     expect(out.get(2)).toEqual([]);
     expect(out.has(99)).toBe(false);
   });
@@ -103,12 +108,12 @@ describe("extractJobs", () => {
   it("drops blank titles; merges repeated messageId entries", async () => {
     const llm = new FakeLlm(() => ({
       results: [
-        { messageId: 1, jobs: [jobPost({ title: " " })] },
-        { messageId: 1, jobs: [jobPost({ title: "B" })] },
+        { messageId: 1, jobs: [{ ...jobPost({ title: " " }), relevant: true }] },
+        { messageId: 1, jobs: [{ ...jobPost({ title: "B" }), relevant: true }] },
       ],
     }));
     const out = await extractJobs(llm, "m", [{ id: 1, text: POST_HE }]);
-    expect(out.get(1)!.map((j) => j.title)).toEqual(["B"]);
+    expect(out.get(1)!.map((j) => j.post.title)).toEqual(["B"]);
   });
   it("rejects duplicate input ids", async () => {
     await expect(
@@ -124,5 +129,24 @@ describe("extractJobs", () => {
         { id: 1, text: "a" },
       ]),
     ).rejects.toThrow();
+  });
+});
+
+describe("extract relevance", () => {
+  it("passes roles as cached context and keeps relevant flag", async () => {
+    const llm = new FakeLlm(() => ({
+      results: [{ messageId: 1, jobs: [{ ...jobPost(), relevant: false }] }],
+    }));
+    const out = await extractJobs(llm, "m", [{ id: 1, text: POST_HE }], ["ML engineer"]);
+    expect(out.get(1)![0]!.relevant).toBe(false);
+    expect(llm.calls[0]!.context).toBe("Target roles: ML engineer");
+    expect(llm.calls[0]!.label).toBe("extract");
+  });
+  it("without roles every job is relevant", async () => {
+    const llm = new FakeLlm(() => ({
+      results: [{ messageId: 1, jobs: [{ ...jobPost(), relevant: false }] }],
+    }));
+    const out = await extractJobs(llm, "m", [{ id: 1, text: POST_HE }]);
+    expect(out.get(1)![0]!.relevant).toBe(true);
   });
 });

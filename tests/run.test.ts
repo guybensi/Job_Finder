@@ -42,7 +42,10 @@ function fakeLlm(s: Script = {}) {
       return {
         results: ids.map(([, id, text]) => ({
           messageId: Number(id),
-          jobs: (s.jobsFor ?? (() => [jobPost({ region: "center" })]))(text!),
+          jobs: (s.jobsFor ?? (() => [jobPost({ region: "center" })]))(text!).map((j) => ({
+            relevant: true,
+            ...j,
+          })),
         })),
       };
     }
@@ -206,7 +209,7 @@ describe("runPipeline", () => {
     const llm = fakeLlm();
     await runPipeline(deps(store, llm).d);
     const matchCall = llm.calls.find((c) => c.system === MATCH_SYSTEM)!;
-    expect(matchCall.prompt).toContain('- Skipped "QA Tester" at Old Co: not my field');
+    expect(matchCall.context).toContain('- Skipped "QA Tester" at Old Co: not my field');
   });
 });
 
@@ -240,5 +243,68 @@ describe("toCard / formatSalary", () => {
     const fb = { ...cards[0]!, draft: { ...(cards[0]!.draft as object), fallback: true } };
     expect(toCard(fb, master)!.concerns).toContain(T.cvNotTailored);
     expect(toCard(cards[0]!, null)!.cvVariant).toBeNull();
+  });
+});
+
+function runLlm(relevant: boolean, extractFails = false) {
+  return new FakeLlm((req: LlmRequest<z.ZodType>) => {
+    if (req.system === EXTRACT_SYSTEM) {
+      if (extractFails) throw new Error("down");
+      const ids = [...req.prompt.matchAll(/messageId: (\d+)/g)].map((m) => Number(m[1]));
+      return {
+        results: ids.map((id) => ({
+          messageId: id,
+          jobs: [{ ...jobPost({ region: "center" }), relevant }],
+        })),
+      };
+    }
+    if (req.system === MATCH_SYSTEM) return { score: 90, reasons: [], concerns: [], variant: LLM };
+    throw new Error("unexpected call");
+  });
+}
+
+describe("run cost controls", () => {
+  const profile = { ...DEFAULT_PROFILE, regions: ["center" as const] };
+  const costDeps = (store: ReturnType<typeof openStore>, llm: FakeLlm, now = 10_000) => ({
+    store,
+    llm,
+    models: { extract: "m", tailor: "m" },
+    profile,
+    master: null,
+    sendCard: async () => {},
+    now: () => now,
+  });
+  const seedText = (store: ReturnType<typeof openStore>, text: string, id: string, ts = 1000) =>
+    store.insertMessage({ waId: id, groupId: "g", groupName: "G", sender: "x", text, ts });
+
+  it("irrelevant job is filtered without scoring", async () => {
+    const store = openStore(":memory:");
+    seedText(store, POST_HE, "a");
+    const llm = runLlm(false);
+    const r = await runPipeline({ ...costDeps(store, llm), master });
+    expect(r.filtered).toBe(1);
+    expect(store.jobsByStatus("filtered")[0]!.reasons).toEqual(["not related to the target roles"]);
+    expect(llm.calls.filter((c) => c.system === MATCH_SYSTEM)).toHaveLength(0);
+  });
+  it("forwarded copies skip the model, in the same run and later runs", async () => {
+    const store = openStore(":memory:");
+    seedText(store, POST_HE, "a");
+    seedText(store, `  ${POST_HE}\n`, "b");
+    const llm = runLlm(true);
+    const r = await runPipeline(costDeps(store, llm));
+    expect(r).toMatchObject({ candidates: 1, duplicates: 1 });
+    seedText(store, POST_HE, "c", 2000);
+    const r2 = await runPipeline(costDeps(store, llm));
+    expect(r2).toMatchObject({ candidates: 0, duplicates: 1 });
+    expect(llm.calls.filter((c) => c.system === EXTRACT_SYSTEM)).toHaveLength(1);
+    expect(store.pendingMessages(10)).toEqual([]);
+  });
+  it("extract failures stop retrying after 6 hours", async () => {
+    const store = openStore(":memory:");
+    seedText(store, POST_HE, "a", 0);
+    await runPipeline(costDeps(store, runLlm(true, true), 5 * 3600_000));
+    expect(store.pendingMessages(10)).toHaveLength(1);
+    await runPipeline(costDeps(store, runLlm(true, true), 7 * 3600_000));
+    expect(store.pendingMessages(10)).toHaveLength(0);
   });
 });

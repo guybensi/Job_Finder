@@ -275,11 +275,11 @@ export async function tailorCv(
   if (!master.variants.some((v) => v.id === variantId)) {
     throw new Error(`variant ${variantId} does not exist`);
   }
+  // The master CV is the same for every job: cache it.
+  const context = `Candidate name: ${master.name}\nMaster CV:\n${quoteData("cv", cvForPrompt(master))}`;
   const base = [
     `Start from variant: ${variantId}`,
-    `Candidate name: ${master.name}`,
-    `Master CV:\n${quoteData("cv", cvForPrompt(master))}`,
-    `Job:\n${quoteData("job", JSON.stringify(job, null, 2))}`,
+    `Job:\n${quoteData("job", JSON.stringify(job))}`,
   ].join("\n\n");
 
   let errors: string[] = [];
@@ -293,8 +293,10 @@ export async function tailorCv(
     const tailored = await llm.json({
       model,
       system: TAILOR_SYSTEM,
+      context,
       prompt,
       schema: TailoredCvSchema,
+      label: "tailor",
     });
     const result = validateTailored(master, tailored, job);
     if (result.ok) return { tailored, errors: [], fallback: false };

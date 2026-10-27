@@ -1,13 +1,13 @@
 import { z } from "zod";
 import type { Profile } from "../config.js";
-import { cvForPrompt, type MasterCv } from "../cv/master.js";
+import { cvForMatch, type MasterCv } from "../cv/master.js";
 import { tailorCv, TailoredCvSchema } from "../cv/tailor.js";
 import type { Llm } from "../llm.js";
 import type { JobRecord, Store } from "../store.js";
 import type { CardInput } from "../telegram/cards.js";
 import { T } from "../telegram/texts.js";
 import { findDuplicate, fingerprint } from "./dedupe.js";
-import { extractJobs, type JobPost, JobPostSchema } from "./extract.js";
+import { type ExtractedJob, extractJobs, type JobPost, JobPostSchema } from "./extract.js";
 import { formatLearned, hardFilter, scoreMatch } from "./match.js";
 import { looksLikeJobPost } from "./prefilter.js";
 
@@ -48,7 +48,8 @@ const BATCH = 10;
 const MAX_MESSAGES = 200;
 const DEDUPE_DAYS = 30;
 const DAY = 24 * 60 * 60 * 1000;
-const RETRY_FOR = DAY;
+/** Model/API errors are retried on later runs for this long, then given up (bounds the cost). */
+const RETRY_FOR = 6 * 60 * 60 * 1000;
 
 /** Parse a stored post; `null` if it no longer matches the schema. */
 export function storedPost(job: JobRecord): JobPost | null {
@@ -86,9 +87,22 @@ export async function runPipeline(deps: RunDeps): Promise<RunReport> {
   // 1. Messages → job posts.
   const pending = store.pendingMessages(MAX_MESSAGES);
   report.messages = pending.length;
-  const candidates = pending.filter((m) => looksLikeJobPost(m.text));
+  // Chit-chat, and posts already seen (the same post forwarded to several groups), never reach
+  // the model.
+  const seenTexts = new Set<string>();
+  const candidates = pending.filter((m) => {
+    if (!looksLikeJobPost(m.text)) return false;
+    const key = m.text.trim().replace(/\s+/g, " ").toLowerCase();
+    if (seenTexts.has(key) || store.hasProcessedText(m.text)) {
+      report.duplicates++;
+      return false;
+    }
+    seenTexts.add(key);
+    return true;
+  });
   report.candidates = candidates.length;
-  store.markProcessed(pending.filter((m) => !looksLikeJobPost(m.text)).map((m) => m.id));
+  const candidateIds = new Set(candidates.map((m) => m.id));
+  store.markProcessed(pending.filter((m) => !candidateIds.has(m.id)).map((m) => m.id));
 
   const recent = store
     .jobsSince(now() - DEDUPE_DAYS * DAY)
@@ -97,16 +111,17 @@ export async function runPipeline(deps: RunDeps): Promise<RunReport> {
 
   for (let i = 0; i < candidates.length; i += BATCH) {
     const batch = candidates.slice(i, i + BATCH);
-    let extracted: Map<number, JobPost[]>;
+    let extracted: Map<number, ExtractedJob[]>;
     try {
-      extracted = await extractJobs(llm, models.extract, batch);
+      extracted = await extractJobs(llm, models.extract, batch, profile.roles);
     } catch (e) {
-      // Left unprocessed, so the next run tries again.
+      // Left unprocessed so the next run tries again, but not forever.
       report.errors.push(`extract: ${(e as Error).message}`);
+      store.markProcessed(batch.filter((m) => now() - m.ts > RETRY_FOR).map((m) => m.id));
       continue;
     }
     for (const m of batch) {
-      for (const post of extracted.get(m.id) ?? []) {
+      for (const { post, relevant } of extracted.get(m.id) ?? []) {
         if (findDuplicate(post, recent) !== -1) {
           report.duplicates++;
           continue;
@@ -117,7 +132,9 @@ export async function runPipeline(deps: RunDeps): Promise<RunReport> {
           { fingerprint: fingerprint(post), messageId: m.id, groupName: m.groupName, post },
           now(),
         );
-        const filter = hardFilter(post, profile);
+        const filter = relevant
+          ? hardFilter(post, profile)
+          : { pass: false, reasons: ["not related to the target roles"] };
         if (!filter.pass) {
           store.updateJob(id, { status: "filtered", reasons: filter.reasons }, now());
           report.filtered++;
@@ -145,7 +162,7 @@ export async function runPipeline(deps: RunDeps): Promise<RunReport> {
       })
       .filter((x) => x !== null),
   );
-  const cvText = cvForPrompt(master);
+  const cvText = cvForMatch(master);
 
   let tailored = 0;
   for (const job of waiting) {
@@ -185,7 +202,7 @@ export async function runPipeline(deps: RunDeps): Promise<RunReport> {
       report.ready++;
       await deps.sendCard(updated);
     } catch (e) {
-      // Model/API errors are often transient: retry on later runs, give up after a day.
+      // Model/API errors are often transient: retry on later runs, then give up.
       report.errors.push(`job ${job.id}: ${(e as Error).message}`);
       if (now() - job.createdAt > RETRY_FOR) {
         store.updateJob(job.id, { status: "failed", reasons: [(e as Error).message] }, now());

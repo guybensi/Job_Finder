@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  cvForMatch,
   cvForPrompt,
   cvSummary,
   loadMaster,
@@ -107,5 +108,16 @@ describe("master helpers", () => {
     saveMaster(dir, master);
     expect(loadMaster(dir)).toEqual(master);
     expect(() => saveMaster(dir, { ...master, variants: [] })).toThrow();
+  });
+});
+
+describe("cvForMatch", () => {
+  it("headings and skills only, much shorter", () => {
+    const t = cvForMatch(master);
+    expect(t).toContain("experience: Software Engineer (Acme Analytics, 2022 – 2024)");
+    expect(t).toContain("skills: Languages: Python, TypeScript, SQL");
+    expect(t).toContain(`Variant ${LLM}: Backend Engineer (Python/APIs) — `);
+    expect(t).not.toContain("Cut API latency");
+    expect(t.length).toBeLessThan(cvForPrompt(master).length * 0.7);
   });
 });

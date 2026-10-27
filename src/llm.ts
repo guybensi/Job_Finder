@@ -10,10 +10,62 @@ export interface LlmRequest<S extends z.ZodType> {
   prompt: string;
   /** Zod schema of the JSON answer; the response is validated against it. */
   schema: S;
+  /**
+   * Large data that stays the same across many calls (e.g. the CV). It is sent after the system
+   * prompt with a cache marker, so repeat calls within a few minutes read it from the prompt
+   * cache at a tenth of the price.
+   */
+  context?: string;
   /** PDF files sent alongside the prompt (e.g. an uploaded CV). */
   pdfs?: Buffer[];
   maxTokens?: number;
   effort?: Effort;
+  /** Pipeline step, for usage accounting ("extract", "match", ...). */
+  label?: string;
+}
+
+/** Tokens one call used. */
+export interface Usage {
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+}
+
+export interface UsageRecord extends Usage {
+  label: string;
+  model: string;
+}
+
+/** USD per million tokens: [input, output]. Cache reads cost 0.1x input, writes 1.25x. */
+const PRICES: [prefix: string, input: number, output: number][] = [
+  ["claude-haiku-5-5", 0.1, 0.5],
+  ["claude-sonnet-5-5", 2, 10],
+  ["claude-opus-5-5", 4, 20],
+  ["claude-opus-5", 5, 25],
+  ["claude-fable-5", 10, 50],
+];
+
+/**
+ * Estimated cost of a call in USD, from list prices (prompts up to 100K tokens).
+ *
+ * Example:
+ *   estimateCostUsd("claude-haiku-5-5", { input: 1_000_000, output: 0, cacheRead: 0, cacheWrite: 0 })
+ *   // → 0.1
+ *
+ * @returns The cost, or `null` for a model without a known price.
+ */
+export function estimateCostUsd(model: string, u: Usage): number | null {
+  const price = PRICES.find(([prefix]) => model.trim().toLowerCase().startsWith(prefix));
+  if (!price) return null;
+  const [, inPrice, outPrice] = price;
+  return (
+    (u.input * inPrice +
+      u.cacheRead * inPrice * 0.1 +
+      u.cacheWrite * inPrice * 1.25 +
+      u.output * outPrice) /
+    1_000_000
+  );
 }
 
 /** Every model call goes through this, so tests can swap in `FakeLlm`. */
@@ -49,7 +101,11 @@ export function supportsServerFallback(model: string): boolean {
  * @throws LlmError when the model refuses, is cut off, or returns output that fails the schema.
  */
 export class AnthropicLlm implements Llm {
-  constructor(private readonly client: Anthropic) {}
+  /** @param onUsage Called after every call (also refused ones, which are billed too). */
+  constructor(
+    private readonly client: Anthropic,
+    private readonly onUsage?: (u: UsageRecord) => void,
+  ) {}
 
   async json<S extends z.ZodType>(req: LlmRequest<S>): Promise<z.infer<S>> {
     const content: Anthropic.Beta.BetaContentBlockParam[] = (req.pdfs ?? []).map((pdf) => ({
@@ -64,9 +120,23 @@ export class AnthropicLlm implements Llm {
       ...(supportsServerFallback(req.model)
         ? { betas: ["server-side-fallback-2026-07-01"], fallbacks: "default" as const }
         : {}),
-      system: [{ type: "text", text: req.system, cache_control: { type: "ephemeral" } }],
+      system: req.context
+        ? [
+            { type: "text", text: req.system },
+            { type: "text", text: req.context, cache_control: { type: "ephemeral" } },
+          ]
+        : [{ type: "text", text: req.system, cache_control: { type: "ephemeral" } }],
       messages: [{ role: "user", content }],
       output_config: { format: betaZodOutputFormat(req.schema), effort: req.effort ?? "medium" },
+    });
+
+    this.onUsage?.({
+      label: req.label ?? "llm",
+      model: req.model,
+      input: response.usage.input_tokens,
+      output: response.usage.output_tokens,
+      cacheRead: response.usage.cache_read_input_tokens ?? 0,
+      cacheWrite: response.usage.cache_creation_input_tokens ?? 0,
     });
 
     if (response.stop_reason === "refusal") {

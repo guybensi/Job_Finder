@@ -194,3 +194,20 @@ describe("tailorCv", () => {
     );
   });
 });
+
+describe("tailor caching", () => {
+  it("CV in context, not in prompt", async () => {
+    const llm = new FakeLlm(() => ({
+      variant: LLM,
+      headline: "Backend Engineer (Python/APIs)",
+      summary: "Backend engineer.",
+      items: [{ id: "exp-1", bullets: ["Cut API latency by 40% with caching"] }],
+      coverMessage: "Hello, Backend Engineer at Example Labs. Dana Example",
+    }));
+    await tailorCv(llm, "m", master, jobPost(), LLM);
+    const c = llm.calls[0]!;
+    expect(c.context).toContain("Cut API latency");
+    expect(c.prompt).not.toContain("Cut API latency");
+    expect(c.label).toBe("tailor");
+  });
+});

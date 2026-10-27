@@ -127,7 +127,7 @@ const ScoreSchema = z.object({
 
 export interface MatchContext {
   profile: Profile;
-  /** Master CV as prompt text (see `cvForPrompt`). */
+  /** Short CV for scoring (see `cvForMatch`); the full CV is only needed for tailoring. */
   cv: string;
   /** CV variants the tailor can start from. */
   variants: { id: string; label: string }[];
@@ -182,15 +182,24 @@ export async function scoreMatch(
   ]
     .filter(Boolean)
     .join("\n");
-  const prompt = [
+  // Everything but the job is the same for every job in a run: cache it.
+  const context = [
     `Candidate profile:\n${profileText}`,
     `CV variants: ${ctx.variants.map((v) => `${v.id} (${v.label})`).join(", ")}`,
     quoteData("cv", ctx.cv),
     ctx.learned ? `Past skip reasons:\n${ctx.learned}` : "No skip history yet.",
-    `Job:\n${quoteData("job", JSON.stringify(job, null, 2))}`,
   ].join("\n\n");
+  const prompt = `Job:\n${quoteData("job", JSON.stringify(job))}`;
 
-  const r = await llm.json({ model, system: MATCH_SYSTEM, prompt, schema: ScoreSchema });
+  const r = await llm.json({
+    model,
+    system: MATCH_SYSTEM,
+    context,
+    prompt,
+    schema: ScoreSchema,
+    effort: "low",
+    label: "match",
+  });
   const ids = ctx.variants.map((v) => v.id);
   return {
     score: Math.round(Math.min(100, Math.max(0, Number.isFinite(r.score) ? r.score : 0))),
