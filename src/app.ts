@@ -13,9 +13,9 @@ import {
 } from "./cv/master.js";
 import { cvFileName, renderPdf } from "./cv/render.js";
 import { checkHealth, throttleAlerts } from "./health.js";
-import type { Llm } from "./llm.js";
+import { estimateCostUsd, type Llm, type UsageRecord } from "./llm.js";
 import { DraftSchema, type RunReport, runPipeline, storedPost, toCard } from "./pipeline/run.js";
-import { isDigestDue, Lock } from "./scheduler.js";
+import { isDigestDue, localTime, Lock } from "./scheduler.js";
 import type { JobRecord, JobStatus, Store } from "./store.js";
 import type { BotHandlers } from "./telegram/bot.js";
 import type { CardInput } from "./telegram/cards.js";
@@ -49,6 +49,53 @@ export interface App {
   tick(): Promise<void>;
   isPaused(): boolean;
   queue: ApplyQueue;
+  /** Add one model call to today's usage (wired to `AnthropicLlm`'s `onUsage`). */
+  recordUsage(u: UsageRecord): void;
+  /** Today's estimated API cost, as shown in /status. */
+  costToday(): DailyUsage;
+}
+
+/** Model usage of one local day, kept in the kv table. */
+export interface DailyUsage {
+  calls: number;
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+  usd: number;
+  /** USD per pipeline step ("extract", "match", "tailor", "cv"). */
+  byLabel: Record<string, number>;
+}
+
+const EMPTY_USAGE: DailyUsage = {
+  calls: 0,
+  input: 0,
+  output: 0,
+  cacheRead: 0,
+  cacheWrite: 0,
+  usd: 0,
+  byLabel: {},
+};
+
+/**
+ * Add one call to a day's usage. Unknown models are counted at the Opus 5.5 price, so the
+ * estimate errs high rather than low.
+ *
+ * Example:
+ *   addUsage(EMPTY, { label: "match", model: "claude-haiku-5-5", input: 1000, output: 100, cacheRead: 0, cacheWrite: 0 })
+ *   // → { calls: 1, input: 1000, output: 100, ..., usd: 0.00015, byLabel: { match: 0.00015 } }
+ */
+export function addUsage(day: DailyUsage, u: UsageRecord): DailyUsage {
+  const usd = estimateCostUsd(u.model, u) ?? estimateCostUsd("claude-opus-5-5", u)!;
+  return {
+    calls: day.calls + 1,
+    input: day.input + u.input,
+    output: day.output + u.output,
+    cacheRead: day.cacheRead + u.cacheRead,
+    cacheWrite: day.cacheWrite + u.cacheWrite,
+    usd: day.usd + usd,
+    byLabel: { ...day.byLabel, [u.label]: (day.byLabel[u.label] ?? 0) + usd },
+  };
 }
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -171,6 +218,20 @@ export function createApp(d: AppDeps): App {
     await Promise.race([d.refreshGroups().catch(() => undefined), timeout]);
   };
 
+  const usageKey = () => `usage:${localTime(now(), d.timeZone ?? "Asia/Jerusalem").date}`;
+  const costToday = () => d.store.getKv<DailyUsage>(usageKey(), EMPTY_USAGE);
+  const costText = () => {
+    const u = costToday();
+    return T.cost(u.usd, u.calls);
+  };
+  const recordUsage = (u: UsageRecord) => {
+    d.store.setKv(usageKey(), addUsage(costToday(), u));
+    const usd = estimateCostUsd(u.model, u);
+    console.log(
+      `llm ${u.label} ${u.model} in=${u.input} out=${u.output} cache_read=${u.cacheRead} cache_write=${u.cacheWrite}${usd === null ? "" : ` $${usd.toFixed(5)}`}`,
+    );
+  };
+
   const readyJob = (jobId: number) => {
     const job = d.store.getJob(jobId);
     return job && job.status === "ready" ? job : null;
@@ -187,6 +248,7 @@ export function createApp(d: AppDeps): App {
         groups: d.store.getKv<string[]>(KV.allowedGroups, []).length,
         hasCv: loadMaster(dataDir) !== null,
         today: formatCounts(d.store.statusCounts(now() - DAY)).replace(/\n/g, ", "),
+        cost: costText(),
       });
     },
     scan() {
@@ -277,7 +339,7 @@ export function createApp(d: AppDeps): App {
     const lastDigest = d.store.getKv<number | null>("last_digest", null);
     if (isDigestDue(now(), lastDigest, d.digestHour ?? 20, d.timeZone ?? "Asia/Jerusalem")) {
       d.store.setKv("last_digest", now());
-      await d.notify(T.digest(formatCounts(d.store.statusCounts(now() - DAY))));
+      await d.notify(T.digest(formatCounts(d.store.statusCounts(now() - DAY)), costText()));
     }
 
     const alerts = checkHealth({
@@ -299,6 +361,8 @@ export function createApp(d: AppDeps): App {
     tick,
     isPaused: () => d.store.getKv("paused", false),
     queue,
+    recordUsage,
+    costToday,
   };
 }
 

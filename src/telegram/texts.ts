@@ -94,6 +94,7 @@ export const T = {
     groups: number;
     hasCv: boolean;
     today: string;
+    cost: string;
   }) =>
     [
       s.paused ? "⏸ מושהה" : "▶️ פעיל",
@@ -103,6 +104,7 @@ export const T = {
       `קבוצות בסריקה: ${s.groups}`,
       `קורות חיים: ${s.hasCv ? "קיימים" : "חסרים, שלח /cv"}`,
       `היום: ${s.today}`,
+      `עלות API היום: ${s.cost}`,
     ].join("\n"),
   never: "אף פעם",
   ago: (minutes: number) =>
@@ -144,7 +146,9 @@ export const T = {
   runSummary: (found: number, cards: number) =>
     `סריקה הסתיימה: ${found} משרות חדשות, ${cards} מתאימות.`,
   noCvWarning: "יש משרות מתאימות אבל עוד אין קורות חיים. שלח /cv.",
-  digest: (counts: string) => `סיכום יומי (24 שעות):\n${counts}`,
+  digest: (counts: string, cost: string) =>
+    `סיכום יומי (24 שעות):\n${counts}\n\nעלות API היום: ${cost}`,
+  cost: (usd: number, calls: number) => `$${usd.toFixed(usd < 1 ? 3 : 2)} (${calls} קריאות)`,
   noActivity: "אין פעילות",
   statusLabels: {
     new: "ממתינות לעיבוד",

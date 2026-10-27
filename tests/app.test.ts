@@ -4,7 +4,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import type { z } from "zod";
 import type { Mail } from "../src/apply/email.js";
-import { createApp, formatCounts } from "../src/app.js";
+import { addUsage, createApp, formatCounts } from "../src/app.js";
 import { DEFAULT_PROFILE, loadEnv, profileToYaml } from "../src/config.js";
 import { renderPdf } from "../src/cv/render.js";
 import { saveMaster, loadMaster } from "../src/cv/master.js";
@@ -385,5 +385,50 @@ describe("manual scan report", () => {
     expect(s.notes[0]).toContain("נשלחו אליך: 1");
     expect(s.notes[0]).not.toContain(T.scanHintNoMessages);
     expect(s.cards).toHaveLength(1);
+  });
+});
+
+describe("usage accounting", () => {
+  const rec = (over = {}) => ({
+    label: "match",
+    model: "claude-haiku-5-5",
+    input: 1000,
+    output: 100,
+    cacheRead: 0,
+    cacheWrite: 0,
+    ...over,
+  });
+  it("addUsage sums tokens and cost per label; unknown model priced as Opus", () => {
+    const empty = {
+      calls: 0,
+      input: 0,
+      output: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+      usd: 0,
+      byLabel: {},
+    };
+    const one = addUsage(empty, rec());
+    expect(one).toMatchObject({ calls: 1, input: 1000, output: 100 });
+    expect(one.usd).toBeCloseTo(0.00015);
+    const two = addUsage(
+      one,
+      rec({ label: "extract", model: "mystery", input: 1_000_000, output: 0 }),
+    );
+    expect(two.byLabel.extract).toBeCloseTo(4);
+    expect(two.byLabel.match).toBeCloseTo(0.00015);
+    expect(two.calls).toBe(2);
+  });
+  it("recordUsage keeps a per-day total shown in /status and the digest, resetting next day", async () => {
+    const s = setup();
+    s.app.recordUsage(rec());
+    s.app.recordUsage(rec({ label: "extract" }));
+    expect(s.app.costToday().calls).toBe(2);
+    expect(String(s.app.handlers.status())).toContain("עלות API היום: $0.000 (2 קריאות)");
+    s.advance(13 * 3600_000); // 23:00 local → digest due
+    await s.app.tick();
+    expect(s.notes.find((n) => n.startsWith("סיכום יומי"))).toContain("(2 קריאות)");
+    s.advance(2 * 3600_000); // next local day
+    expect(s.app.costToday().calls).toBe(0);
   });
 });

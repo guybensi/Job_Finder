@@ -15,7 +15,8 @@ async function main(): Promise<void> {
   const env = loadEnv(process.env);
   loadProfile(env.DATA_DIR); // creates the default profile on first run, fails fast if invalid
   const store = openStore(dbPath(env.DATA_DIR));
-  const llm = new AnthropicLlm(new Anthropic());
+  // Every call is added to today's cost (shown in /status and the digest).
+  const llm = new AnthropicLlm(new Anthropic(), (u) => app.recordUsage(u));
 
   // The bot and the app need each other: the bot calls app handlers, the app sends via the bot.
   let bot: TelegramBot | null = null;
